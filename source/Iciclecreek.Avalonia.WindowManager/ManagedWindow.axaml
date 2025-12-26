@@ -98,7 +98,7 @@
                            Text="{TemplateBinding Title}"/>
 
                 <!-- System Decorations (aka buttons)-->
-                <StackPanel Grid.Column="3"
+                <StackPanel Grid.Column="3" Margin="10,0,0,0"
                             Orientation="Horizontal"
                             VerticalAlignment="Center"
                             HorizontalAlignment="Right"
@@ -165,6 +165,9 @@
     </Style>
     <Style Selector="^:minimized /template/ Button#PART_CloseButton">
       <Setter Property="IsVisible" Value="False"/>
+    </Style>
+    <Style Selector="^:minimized /template/ Button#PART_RestoreButton" >
+      <Setter Property="IsVisible" Value="True"/>
     </Style>
 
     <!-- window is being moved -->
