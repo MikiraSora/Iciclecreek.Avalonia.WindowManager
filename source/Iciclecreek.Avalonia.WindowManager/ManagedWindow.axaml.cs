@@ -993,7 +993,7 @@ public class ManagedWindow : ContentControl
             child.CloseInternal();
         }
 
-        await CloseAnimation();
+        await Dispatcher.UIThread.InvokeAsync(CloseAnimation);
 
         Owner = null;
         OnClosed(new EventArgs());
@@ -1070,9 +1070,18 @@ public class ManagedWindow : ContentControl
     /// <param name="e">The event args.</param>
     protected async virtual void OnOpened(EventArgs e)
     {
-        await ShowAnimation();
-
-        Dispatcher.UIThread.Invoke(() => Opened?.Invoke(this, e));
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                await ShowAnimation();
+                Opened?.Invoke(this, e);
+            });
+        }
+        catch (Exception ex)
+        {
+            //todo log it
+        }
     }
 
     /// <summary>
