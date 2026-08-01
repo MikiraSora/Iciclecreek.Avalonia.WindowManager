@@ -1,7 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wm="using:Iciclecreek.Avalonia.WindowManager"
-        xmlns:iconPacks="https://github.com/MahApps/IconPacks.Avalonia"
         xmlns:converters="using:Avalonia.Controls.Converters"
         x:Class="Iciclecreek.Avalonia.WindowManager.WindowManagerTheme">
 
@@ -62,45 +61,41 @@
 
       <DataTemplate x:Key="ManagedWindow_MinimizeIcon">
         <ContentControl>
-          <iconPacks:Codicons Kind="ChromeMinimize"
-                              Width="{StaticResource ManagedWindow_SystemIconSize}"
-                              Height="{StaticResource ManagedWindow_SystemIconSize}"/>
+          <PathIcon Data="M1,9 L11,9 L11,10 L1,10 Z"
+                    Width="{StaticResource ManagedWindow_SystemIconSize}"
+                    Height="{StaticResource ManagedWindow_SystemIconSize}"/>
         </ContentControl>
       </DataTemplate>
 
       <DataTemplate x:Key="ManagedWindow_MaximizeIcon">
         <ContentControl>
-          <iconPacks:Codicons
-                          Kind="ChromeMaximize"
-                          Width="{StaticResource ManagedWindow_SystemIconSize}"
-                          Height="{StaticResource ManagedWindow_SystemIconSize}"/>
+          <PathIcon Data="M1,1 L11,1 L11,11 L1,11 Z M2,2 L2,10 L10,10 L10,2 Z"
+                    Width="{StaticResource ManagedWindow_SystemIconSize}"
+                    Height="{StaticResource ManagedWindow_SystemIconSize}"/>
         </ContentControl>
       </DataTemplate>
 
       <DataTemplate x:Key="ManagedWindow_RestoreIcon">
         <ContentControl>
-          <iconPacks:Codicons
-                          Kind="ChromeRestore"
-                          Width="{StaticResource ManagedWindow_SystemIconSize}"
-                          Height="{StaticResource ManagedWindow_SystemIconSize}"/>
+          <PathIcon Data="M3,1 L11,1 L11,9 L9,9 L9,3 L3,3 Z M1,3 L9,3 L9,11 L1,11 Z M2,4 L2,10 L8,10 L8,4 Z"
+                    Width="{StaticResource ManagedWindow_SystemIconSize}"
+                    Height="{StaticResource ManagedWindow_SystemIconSize}"/>
         </ContentControl>
       </DataTemplate>
 
       <DataTemplate x:Key="ManagedWindow_CloseIcon">
         <ContentControl>
-          <iconPacks:Codicons
-                          Kind="ChromeClose"
-                          Width="{StaticResource ManagedWindow_SystemIconSize}"
-                          Height="{StaticResource ManagedWindow_SystemIconSize}"/>
+          <PathIcon Data="M2,1 L6,5 L10,1 L11,2 L7,6 L11,10 L10,11 L6,7 L2,11 L1,10 L5,6 L1,2 Z"
+                    Width="{StaticResource ManagedWindow_SystemIconSize}"
+                    Height="{StaticResource ManagedWindow_SystemIconSize}"/>
         </ContentControl>
       </DataTemplate>
 
       <DataTemplate x:Key="ManagedWindow_SystemMenuIcon">
         <ContentControl>
-          <iconPacks:Codicons
-                          Kind="Menu"
-                          Width="{StaticResource ManagedWindow_SystemIconSize}"
-                          Height="{StaticResource ManagedWindow_SystemIconSize}"/>
+          <PathIcon Data="M1,2 L11,2 L11,3 L1,3 Z M1,5.5 L11,5.5 L11,6.5 L1,6.5 Z M1,9 L11,9 L11,10 L1,10 Z"
+                    Width="{StaticResource ManagedWindow_SystemIconSize}"
+                    Height="{StaticResource ManagedWindow_SystemIconSize}"/>
         </ContentControl>
       </DataTemplate>
 
@@ -111,7 +106,5 @@
   <Style Selector=":is(wm|ManagedWindow)">
     <Setter Property="Theme" Value="{StaticResource {x:Type wm:ManagedWindow}}"/>
   </Style>
-
-  <StyleInclude Source="avares://IconPacks.Avalonia.Codicons/Codicons.axaml" />
 
 </Styles>
