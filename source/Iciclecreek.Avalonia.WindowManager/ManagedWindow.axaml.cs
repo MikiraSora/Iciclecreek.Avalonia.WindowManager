@@ -100,6 +100,7 @@ public class ManagedWindow : ContentControl
     private bool _keyboardSizing;
     private ManagedWindow? _modalDialog;
     private readonly List<(ManagedWindow Child, bool IsDialog)> _children = new List<(ManagedWindow, bool)>();
+    private Task? _closeTask;
 
     public ReactiveCommand<Unit, Unit> CloseCommand { get; }
     public ReactiveCommand<Unit, Unit> RestoreCommand { get; }
@@ -305,6 +306,8 @@ public class ManagedWindow : ContentControl
 
     public void PreviousWindow()
     {
+        Dispatcher.UIThread.VerifyAccess();
+
         var index = s_MRU.IndexOf(this);
         if (index > 0)
         {
@@ -318,6 +321,8 @@ public class ManagedWindow : ContentControl
 
     public void NextWindow()
     {
+        Dispatcher.UIThread.VerifyAccess();
+
         var index = s_MRU.IndexOf(this);
         if (index >= 0 && index < s_MRU.Count - 1)
         {
@@ -674,22 +679,25 @@ public class ManagedWindow : ContentControl
 
     protected virtual async void OnMaximizeWindow()
     {
-        BringToTop();
-
-        SetPsuedoClasses();
-
-        await ResizeAnimation(new Rect(this.Position.X, this.Position.Y, this.Bounds.Width, this.Bounds.Height),
-                              new Rect(0, 0, WindowsPanel.Bounds.Width, WindowsPanel.Bounds.Height));
-
-        this.Position = new PixelPoint((ushort)0, (ushort)0);
-        this.Width = WindowsPanel.Bounds.Width;
-        this.Height = WindowsPanel.Bounds.Height;
-        if (_windowBorder != null)
+        await Dispatcher.UIThread.InvokeAsync(async () =>
         {
-            _windowBorder.Margin = new Thickness(0);
-            _windowBorder.BoxShadow = new BoxShadows();
-        }
-        _focus?.Focus();
+            BringToTop();
+
+            SetPsuedoClasses();
+
+            await ResizeAnimation(new Rect(this.Position.X, this.Position.Y, this.Bounds.Width, this.Bounds.Height),
+                                  new Rect(0, 0, WindowsPanel.Bounds.Width, WindowsPanel.Bounds.Height));
+
+            this.Position = new PixelPoint((ushort)0, (ushort)0);
+            this.Width = WindowsPanel.Bounds.Width;
+            this.Height = WindowsPanel.Bounds.Height;
+            if (_windowBorder != null)
+            {
+                _windowBorder.Margin = new Thickness(0);
+                _windowBorder.BoxShadow = new BoxShadows();
+            }
+            _focus?.Focus();
+        });
     }
 
     protected virtual async void OnFullscreenWindow()
@@ -700,42 +708,48 @@ public class ManagedWindow : ContentControl
 
     protected virtual async void OnNormalWindow()
     {
-        BringToTop();
-
-        SetPsuedoClasses();
-
-        await ResizeAnimation(new Rect(this.Position.X, this.Position.Y, this.Bounds.Width, this.Bounds.Height),
-                              _normalRect);
-
-        this.Position = new PixelPoint((int)_normalRect.Position.X, (int)_normalRect.Position.Y);
-        this.Width = _normalRect.Width;
-        this.Height = _normalRect.Height;
-
-        if (_windowBorder != null)
+        await Dispatcher.UIThread.InvokeAsync(async () =>
         {
-            _windowBorder.Margin = _normalMargin;
-            _windowBorder.BoxShadow = _normalBoxShadow;
-        }
-        _focus?.Focus();
+            BringToTop();
+
+            SetPsuedoClasses();
+
+            await ResizeAnimation(new Rect(this.Position.X, this.Position.Y, this.Bounds.Width, this.Bounds.Height),
+                                  _normalRect);
+
+            this.Position = new PixelPoint((int)_normalRect.Position.X, (int)_normalRect.Position.Y);
+            this.Width = _normalRect.Width;
+            this.Height = _normalRect.Height;
+
+            if (_windowBorder != null)
+            {
+                _windowBorder.Margin = _normalMargin;
+                _windowBorder.BoxShadow = _normalBoxShadow;
+            }
+            _focus?.Focus();
+        });
     }
 
     protected virtual async void OnMinimizeWindow()
     {
-        BringToTop();
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            BringToTop();
 
-        SetPsuedoClasses();
+            SetPsuedoClasses();
 
-        if (_minimizedPosition.X == int.MinValue && _minimizedPosition.Y == int.MinValue)
-            _minimizedPosition = new PixelPoint(this.Position.X, this.Position.Y);
+            if (_minimizedPosition.X == int.MinValue && _minimizedPosition.Y == int.MinValue)
+                _minimizedPosition = new PixelPoint(this.Position.X, this.Position.Y);
 
-        await ResizeAnimation(new Rect(this.Position.X, this.Position.Y, this.Bounds.Width, this.Bounds.Height),
-                              new Rect(_minimizedPosition.X, _minimizedPosition.Y, _title.Bounds.Width, _title.Bounds.Height));
+            await ResizeAnimation(new Rect(this.Position.X, this.Position.Y, this.Bounds.Width, this.Bounds.Height),
+                                  new Rect(_minimizedPosition.X, _minimizedPosition.Y, _title.Bounds.Width, _title.Bounds.Height));
 
-        this.Position = _minimizedPosition;
-        this.Width = double.NaN;
-        this.Height = double.NaN;
+            this.Position = _minimizedPosition;
+            this.Width = double.NaN;
+            this.Height = double.NaN;
 
-        _systemMenu?.Focus();
+            _systemMenu?.Focus();
+        });
     }
 
     /// <summary>
@@ -743,6 +757,8 @@ public class ManagedWindow : ContentControl
     /// </summary>
     public void Activate()
     {
+        Dispatcher.UIThread.VerifyAccess();
+
         if (!IsActive && ModalDialog == null && Parent != null)
         {
             if (WindowState == WindowState.Minimized)
@@ -791,6 +807,13 @@ public class ManagedWindow : ContentControl
     /// </summary>
     public virtual void Show(Visual? parent)
     {
+        Dispatcher.UIThread.VerifyAccess();
+
+        if (_closeTask is { IsCompleted: false })
+            throw new InvalidOperationException("Cannot show a window while it is closing.");
+
+        _closeTask = null;
+
         if (parent == null)
         {
             WindowsPanel = FindTopWindowsPanel();
@@ -903,10 +926,12 @@ public class ManagedWindow : ContentControl
     /// </returns>
     public Task<TResult> ShowDialog<TResult>(Visual? parent = null)
     {
+        Dispatcher.UIThread.VerifyAccess();
+
         if (ModalDialog != null)
             throw new NotSupportedException("Already showing a modal dialog for this window");
 
-        var result = new TaskCompletionSource<TResult>();
+        var result = new TaskCompletionSource<TResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         this.Show(parent);
 
@@ -922,8 +947,11 @@ public class ManagedWindow : ContentControl
             this.WindowsPanel.ModalDialog = this;
         }
 
-        this.Closed += (sender, e) =>
+        EventHandler? closedHandler = null;
+        closedHandler = (sender, e) =>
         {
+            this.Closed -= closedHandler;
+
             // when dialog closes change focus back to owner.
             if (this.Owner != null)
             {
@@ -935,8 +963,9 @@ public class ManagedWindow : ContentControl
                 this.WindowsPanel.ModalDialog = null;
             }
 
-            result.SetResult((TResult)(_dialogResult ?? default(TResult)!));
+            result.TrySetResult((TResult)(_dialogResult ?? default(TResult)!));
         };
+        this.Closed += closedHandler;
         SetPsuedoClasses();
         return result.Task;
     }
@@ -946,7 +975,8 @@ public class ManagedWindow : ContentControl
     /// </summary>
     public void Close()
     {
-        CloseCore(WindowCloseReason.WindowClosing, true, false);
+        Dispatcher.UIThread.VerifyAccess();
+        _ = CloseAsync();
     }
 
     /// <summary>
@@ -961,12 +991,39 @@ public class ManagedWindow : ContentControl
     /// </remarks>
     public void Close(object? dialogResult)
     {
-        _dialogResult = dialogResult;
-        CloseCore(WindowCloseReason.WindowClosing, true, false);
+        Dispatcher.UIThread.VerifyAccess();
+        _ = CloseAsync(dialogResult);
     }
 
-    internal void CloseCore(WindowCloseReason reason, bool isProgrammatic, bool ignoreCancel)
+    public Task CloseAsync()
     {
+        Dispatcher.UIThread.VerifyAccess();
+        return CloseCoreAsync(WindowCloseReason.WindowClosing, true, false);
+    }
+
+    public Task CloseAsync(object? dialogResult)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+
+        if (_closeTask is not null)
+            return _closeTask;
+
+        var previousDialogResult = _dialogResult;
+        _dialogResult = dialogResult;
+        var closeTask = CloseCoreAsync(WindowCloseReason.WindowClosing, true, false);
+        if (_closeTask is null)
+            _dialogResult = previousDialogResult;
+
+        return closeTask;
+    }
+
+    internal Task CloseCoreAsync(WindowCloseReason reason, bool isProgrammatic, bool ignoreCancel)
+    {
+        Dispatcher.UIThread.VerifyAccess();
+
+        if (_closeTask is not null)
+            return _closeTask;
+
         bool close = true;
 
         try
@@ -981,31 +1038,43 @@ public class ManagedWindow : ContentControl
         {
             if (close || ignoreCancel)
             {
-                CloseInternal();
+                _closeTask = CloseInternalAsync();
             }
         }
+
+        return _closeTask ?? Task.CompletedTask;
     }
 
-    private async void CloseInternal()
+    private Task BeginCloseInternalAsync()
     {
+        Dispatcher.UIThread.VerifyAccess();
+        return _closeTask ??= CloseInternalAsync();
+    }
+
+    private async Task CloseInternalAsync()
+    {
+        Dispatcher.UIThread.VerifyAccess();
+
         foreach (var (child, _) in _children.ToArray())
         {
-            child.CloseInternal();
+            await Dispatcher.UIThread.InvokeAsync(child.BeginCloseInternalAsync);
         }
 
         await Dispatcher.UIThread.InvokeAsync(CloseAnimation);
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            Owner = null;
+            OnClosed(EventArgs.Empty);
+            RaiseEvent(new RoutedEventArgs(WindowClosedEvent));
 
-        Owner = null;
-        OnClosed(new EventArgs());
-        RaiseEvent(new RoutedEventArgs(WindowClosedEvent));
+            this.WindowsPanel.Windows.Remove(this);
+            if (s_MRU == null)
+                s_MRU = GetWindows().ToList();
 
-        this.WindowsPanel.Windows.Remove(this);
-        if (s_MRU == null)
-            s_MRU = GetWindows().ToList();
+            PreviousWindow();
 
-        PreviousWindow();
-
-        s_MRU.Remove(this);
+            s_MRU.Remove(this);
+        });
     }
 
     private bool ShouldCancelClose(WindowClosingEventArgs args)
@@ -1141,41 +1210,44 @@ public class ManagedWindow : ContentControl
 
     protected virtual async Task ResizeAnimation(Rect oldPosition, Rect newPosition)
     {
-        if (AnimateWindow)
+        await Dispatcher.UIThread.InvokeAsync(async () =>
         {
-            var animation = new Animation
+            if (AnimateWindow)
             {
-                Duration = TimeSpan.FromMilliseconds(100),
-                FillMode = FillMode.Forward, // Ensure the animation holds the end value
-                Children =
+                var animation = new Animation
                 {
-                    new KeyFrame
+                    Duration = TimeSpan.FromMilliseconds(100),
+                    FillMode = FillMode.Forward, // Ensure the animation holds the end value
+                    Children =
                     {
-                        Setters =
+                        new KeyFrame
                         {
-                            new Setter(Canvas.LeftProperty, oldPosition.X),
-                            new Setter(Canvas.TopProperty, oldPosition.Y),
-                            new Setter(WidthProperty, oldPosition.Width),
-                            new Setter(HeightProperty, oldPosition.Height)
+                            Setters =
+                            {
+                                new Setter(Canvas.LeftProperty, oldPosition.X),
+                                new Setter(Canvas.TopProperty, oldPosition.Y),
+                                new Setter(WidthProperty, oldPosition.Width),
+                                new Setter(HeightProperty, oldPosition.Height)
+                            },
+                            Cue = new Cue(0d)
                         },
-                        Cue = new Cue(0d)
-                    },
-                    new KeyFrame
-                    {
-                        Setters =
+                        new KeyFrame
                         {
-                            new Setter(Canvas.LeftProperty, newPosition.X),
-                            new Setter(Canvas.TopProperty, newPosition.Y),
-                            new Setter(WidthProperty, newPosition.Width),
-                            new Setter(HeightProperty, newPosition.Height)
-                        },
-                        Cue = new Cue(1d)
+                            Setters =
+                            {
+                                new Setter(Canvas.LeftProperty, newPosition.X),
+                                new Setter(Canvas.TopProperty, newPosition.Y),
+                                new Setter(WidthProperty, newPosition.Width),
+                                new Setter(HeightProperty, newPosition.Height)
+                            },
+                            Cue = new Cue(1d)
+                        }
                     }
-                }
-            };
+                };
 
-            await animation.RunAsync(this);
-        }
+                await animation.RunAsync(this);
+            }
+        });
     }
 
     protected virtual async Task CloseAnimation()
