@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -21,6 +21,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Windows.Input;
 
 namespace Iciclecreek.Avalonia.WindowManager;
@@ -90,6 +91,7 @@ public class ManagedWindow : ContentControl
     private bool _isActive;
     private bool _resizeThicknessExplicitlySet;
     private object? _dialogResult;
+    private Task<bool>? _closeTask;
     private Control? _title;
     private Control? _titleBar;
     private Control? _focus;
@@ -732,6 +734,11 @@ public class ManagedWindow : ContentControl
 
     protected virtual async void OnMaximizeWindow()
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(OnMaximizeWindow);
+            return;
+        }
         BringToTop();
 
         SetPsudoClasses();
@@ -752,12 +759,22 @@ public class ManagedWindow : ContentControl
 
     protected virtual async void OnFullscreenWindow()
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(OnFullscreenWindow);
+            return;
+        }
         await Task.CompletedTask;
         OnMaximizeWindow();
     }
 
     protected virtual async void OnNormalWindow()
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(OnNormalWindow);
+            return;
+        }
         BringToTop();
 
         SetPsudoClasses();
@@ -779,6 +796,11 @@ public class ManagedWindow : ContentControl
 
     protected virtual async void OnMinimizeWindow()
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(OnMinimizeWindow);
+            return;
+        }
         BringToTop();
 
         SetPsudoClasses();
@@ -908,6 +930,7 @@ public class ManagedWindow : ContentControl
     /// </summary>
     public virtual void Show(Visual? parent)
     {
+        Dispatcher.UIThread.VerifyAccess();
         if (parent == null)
         {
             WindowsPanel = FindTopWindowsPanel();
@@ -1060,60 +1083,114 @@ public class ManagedWindow : ContentControl
         SetPsudoClasses();
         return result.Task;
     }
+    /// <summary>
+    /// Closes the window and completes after close animation and cleanup finish.
+    /// </summary>
+    public Task CloseAsync()
+    {
+        return CloseAsync(null);
+    }
 
     /// <summary>
-    /// Closes the window.
+    /// Closes a dialog window with the specified result and completes after close animation and cleanup finish.
+    /// </summary>
+    /// <param name="dialogResult">The dialog result.</param>
+    public Task CloseAsync(object? dialogResult)
+    {
+        if (_closeTask is { } closeTask)
+            return closeTask;
+
+        _dialogResult = dialogResult;
+        var task = CloseCoreAsync(WindowCloseReason.WindowClosing, true, false);
+        _closeTask = task;
+
+        if (task.IsCompletedSuccessfully)
+        {
+            if (!task.Result)
+                _closeTask = null;
+        }
+        else if (!task.IsCompleted)
+        {
+            _ = ResetCloseTaskWhenCanceledAsync(task);
+        }
+
+        return task;
+    }
+
+    /// <summary>
+    /// Closes the window without waiting for asynchronous animation cleanup.
     /// </summary>
     public void Close()
     {
-        CloseCore(WindowCloseReason.WindowClosing, true, false);
+        _ = CloseAsync();
     }
 
     /// <summary>
-    /// Closes a dialog window with the specified result.
+    /// Closes a dialog window without waiting for asynchronous animation cleanup.
     /// </summary>
     /// <param name="dialogResult">The dialog result.</param>
-    /// <remarks>
-    /// When the window is shown with the <see cref="ShowDialog{TResult}(Window)"/>
-    /// or <see cref="ShowDialog{TResult}(Window)"/> method, the
-    /// resulting task will produce the <see cref="_dialogResult"/> value when the window
-    /// is closed.
-    /// </remarks>
     public void Close(object? dialogResult)
     {
-        _dialogResult = dialogResult;
-        CloseCore(WindowCloseReason.WindowClosing, true, false);
+        _ = CloseAsync(dialogResult);
     }
 
-    internal void CloseCore(WindowCloseReason reason, bool isProgrammatic, bool ignoreCancel)
+    private async Task ResetCloseTaskWhenCanceledAsync(Task<bool> closeTask)
     {
-        bool close = true;
-
         try
         {
-            var args = ActivatorEx.CreateInstance<WindowClosingEventArgs>(reason, isProgrammatic);
-            if (ShouldCancelClose(args))
-            {
-                close = false;
-            }
+            if (!await closeTask.ConfigureAwait(false))
+                Interlocked.CompareExchange(ref _closeTask, null, closeTask);
         }
-        finally
+        catch
         {
-            if (close || ignoreCancel)
-            {
-                CloseInternal();
-            }
+            Interlocked.CompareExchange(ref _closeTask, null, closeTask);
         }
     }
 
-    private async void CloseInternal()
+    private async Task<bool> CloseCoreAsync(WindowCloseReason reason, bool isProgrammatic, bool ignoreCancel)
     {
-        foreach (var (child, _) in _children.ToArray())
-        {
-            child.CloseInternal();
-        }
+        var args = ActivatorEx.CreateInstance<WindowClosingEventArgs>(reason, isProgrammatic);
+        if (ShouldCancelClose(args) && !ignoreCancel)
+            return false;
+
+        await CloseInternalAsync();
+        return true;
+    }
+
+    private async Task CloseInternalAsync()
+    {
+        var childCloseTasks = _children
+            .Select(static child => child.Child.CloseInternalAsync())
+            .ToArray();
+        await Task.WhenAll(childCloseTasks);
 
         await CloseAnimation();
+
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Dispatcher.UIThread.Post(() =>
+            {
+                try
+                {
+                    CompleteCloseOnUiThread();
+                    completion.SetResult();
+                }
+                catch (Exception exception)
+                {
+                    completion.SetException(exception);
+                }
+            });
+            await completion.Task.ConfigureAwait(false);
+            return;
+        }
+
+        CompleteCloseOnUiThread();
+    }
+
+    private void CompleteCloseOnUiThread()
+    {
+        Dispatcher.UIThread.VerifyAccess();
 
         Owner = null;
         OnClosed(new EventArgs());
@@ -1251,43 +1328,64 @@ public class ManagedWindow : ContentControl
         }
     }
 
-    protected virtual async Task ResizeAnimation(Rect oldPosition, Rect newPosition)
+    protected virtual Task ResizeAnimation(Rect oldPosition, Rect newPosition)
     {
-        if (AnimateWindow)
-        {
-            var animation = new Animation
-            {
-                Duration = TimeSpan.FromMilliseconds(100),
-                FillMode = FillMode.Forward, // Ensure the animation holds the end value
-                Children =
-                {
-                    new KeyFrame
-                    {
-                        Setters =
-                        {
-                            new Setter(Canvas.LeftProperty, oldPosition.X),
-                            new Setter(Canvas.TopProperty, oldPosition.Y),
-                            new Setter(WidthProperty, oldPosition.Width),
-                            new Setter(HeightProperty, oldPosition.Height)
-                        },
-                        Cue = new Cue(0d)
-                    },
-                    new KeyFrame
-                    {
-                        Setters =
-                        {
-                            new Setter(Canvas.LeftProperty, newPosition.X),
-                            new Setter(Canvas.TopProperty, newPosition.Y),
-                            new Setter(WidthProperty, newPosition.Width),
-                            new Setter(HeightProperty, newPosition.Height)
-                        },
-                        Cue = new Cue(1d)
-                    }
-                }
-            };
+        if (Dispatcher.UIThread.CheckAccess())
+            return ResizeAnimationCore(oldPosition, newPosition);
 
-            await animation.RunAsync(this);
-        }
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Dispatcher.UIThread.Post(async () =>
+        {
+            try
+            {
+                await ResizeAnimationCore(oldPosition, newPosition);
+                completion.SetResult();
+            }
+            catch (Exception exception)
+            {
+                completion.SetException(exception);
+            }
+        });
+        return completion.Task;
+    }
+
+    private async Task ResizeAnimationCore(Rect oldPosition, Rect newPosition)
+    {
+        if (!AnimateWindow)
+            return;
+
+        var animation = new Animation
+        {
+            Duration = TimeSpan.FromMilliseconds(100),
+            FillMode = FillMode.Forward, // Ensure the animation holds the end value
+            Children =
+            {
+                new KeyFrame
+                {
+                    Setters =
+                    {
+                        new Setter(Canvas.LeftProperty, oldPosition.X),
+                        new Setter(Canvas.TopProperty, oldPosition.Y),
+                        new Setter(WidthProperty, oldPosition.Width),
+                        new Setter(HeightProperty, oldPosition.Height)
+                    },
+                    Cue = new Cue(0d)
+                },
+                new KeyFrame
+                {
+                    Setters =
+                    {
+                        new Setter(Canvas.LeftProperty, newPosition.X),
+                        new Setter(Canvas.TopProperty, newPosition.Y),
+                        new Setter(WidthProperty, newPosition.Width),
+                        new Setter(HeightProperty, newPosition.Height)
+                    },
+                    Cue = new Cue(1d)
+                }
+            }
+        };
+
+        await animation.RunAsync(this);
     }
 
     protected virtual async Task CloseAnimation()
