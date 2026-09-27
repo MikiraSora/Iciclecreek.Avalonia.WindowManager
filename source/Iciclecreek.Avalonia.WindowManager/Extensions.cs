@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -12,7 +13,8 @@ namespace Iciclecreek.Avalonia.WindowManager
 {
     internal static class ActivatorEx
     {
-        public static T CreateInstance<T>(params object[] args)
+        public static T CreateInstance<
+            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.NonPublicConstructors)] T>(params object[] args)
         {
             var types = args?.Select(arg => arg.GetType()).ToArray();
             // Get the internal constructor with the specified parameter types
